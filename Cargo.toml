@@ -1,0 +1,46 @@
+[package]
+name = "whisperia"
+version = "0.1.0"
+edition = "2021"
+authors = ["Whisperia Contributors"]
+description = "High-performance voice transcription tool for Linux tiling WMs"
+rust-version = "1.75"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[dependencies]
+# Core & Async
+tokio = { version = "1.35", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# HTTP Client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Configuration & Paths
+directories = "5.0"
+
+# System info
+sysinfo = "0.33"
+
+# For CLI interface
+clap = { version = "4.4", features = ["derive"] }
+
+[[bin]]
+name = "whisperia"
+path = "src/main.rs"
