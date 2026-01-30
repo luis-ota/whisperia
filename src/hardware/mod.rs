@@ -66,9 +66,14 @@ impl HardwareDetector {
         };
 
         let can_run = sys_info.available_memory_gb >= ram_required;
-        let has_enough_vram = vram_required
-            .map(|v| sys_info.gpu_vram_gb.unwrap_or(0) >= v)
-            .unwrap_or(true);
+        // so verifica vram se tem gpu. se nao tem gpu, ignora o requisito de vram
+        let has_enough_vram = if sys_info.has_gpu {
+            vram_required
+                .map(|v| sys_info.gpu_vram_gb.unwrap_or(0) >= v)
+                .unwrap_or(true)
+        } else {
+            true // sem gpu = nao precisa de vram
+        };
 
         ModelCompatibility {
             model: model.to_string(),
