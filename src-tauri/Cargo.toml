@@ -1,0 +1,70 @@
+[package]
+name = "whisperia"
+version = "0.1.0"
+edition = "2021"
+authors = ["Whisperia Contributors"]
+description = "High-performance voice transcription tool"
+rust-version = "1.75"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[dependencies]
+# Tauri
+tauri = { version = "2", features = ["tray-icon", "global-shortcut"] }
+tauri-plugin-shell = "2"
+
+# Core & Async
+tokio = { version = "1.35", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# HTTP Client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Configuration & Paths
+directories = "5.0"
+
+# System info
+sysinfo = "0.33"
+
+# For CLI interface
+clap = { version = "4.4", features = ["derive"] }
+
+# Audio capture
+cpal = "0.15"
+hound = "3.5"
+
+# Whisper transcription
+whisper-rs = "0.15"
+
+# UI dependencies
+tray-icon = "0.19"
+global-hotkey = "0.6"
+winit = "0.30"
+x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
+softbuffer = "0.4"
+enigo = "0.2"
+
+[lib]
+name = "whisperia_lib"
+path = "src/lib.rs"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "whisperia"
+path = "src/main.rs"
