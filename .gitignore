@@ -1,0 +1,17 @@
+# rust
+target/
+cargo.lock
+**/*.rs.bk
+
+# ide
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# os
+.DS_Store
+thumbs.db
+
+# config local
+*.local.toml
