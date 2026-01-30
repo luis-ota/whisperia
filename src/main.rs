@@ -1,12 +1,27 @@
 use anyhow::Result;
 use clap::Parser;
+use std::path::PathBuf;
+use std::sync::mpsc::channel;
+use std::thread;
 use tracing::info;
 
+mod audio;
 mod config;
 mod hardware;
+mod hotkeys;
+mod input;
+mod overlay;
+mod tray;
+mod transcription;
 
+use audio::AudioRecorder;
 use config::Config;
 use hardware::HardwareDetector;
+use input::InputSimulator;
+use overlay::{OverlayCommand, OverlayState};
+use tray::{setup_tray, AppEvent};
+use hotkeys::setup_hotkeys;
+use transcription::Transcriber;
 
 #[derive(Parser)]
 #[command(name = "whisperia")]
@@ -27,10 +42,21 @@ struct Cli {
     /// list available models
     #[arg(long)]
     list_models: bool,
+    
+    /// record and transcribe audio (seconds to record)
+    #[arg(long, value_name = "seconds")]
+    transcribe: Option<u64>,
+    
+    /// path to whisper model file
+    #[arg(long, value_name = "path")]
+    model_path: Option<String>,
+    
+    /// run in daemon mode with UI
+    #[arg(long)]
+    daemon: bool,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     // initialize logging
     tracing_subscriber::fmt()
         .with_env_filter("whisperia=info")
@@ -39,6 +65,92 @@ async fn main() -> Result<()> {
     info!("starting whisperia v{}", env!("CARGO_PKG_VERSION"));
 
     let cli = Cli::parse();
+    
+    if cli.daemon {
+        run_daemon()?;
+    } else {
+        run_cli(cli)?;
+    }
+    
+    Ok(())
+}
+
+fn run_daemon() -> Result<()> {
+    println!("whisperia daemon starting...");
+    println!("use tray icon or hotkey to transcribe");
+    
+    let config = Config::load_or_create()?;
+    let (event_tx, event_rx) = channel::<AppEvent>();
+    
+    // setup system tray
+    setup_tray(event_tx.clone())?;
+    
+    // setup global hotkeys
+    setup_hotkeys(event_tx.clone(), &config.shortcut)?;
+    
+    // setup overlay
+    let (overlay_tx, _overlay_rx) = channel::<OverlayCommand>();
+    
+    // setup input simulator
+    let mut input = InputSimulator::new()?;
+    
+    // get model path
+    let model_path = get_model_path(&config)?;
+    
+    println!("daemon ready!");
+    println!("hotkey: {}", config.shortcut);
+    
+    // main event loop
+    loop {
+        if let Ok(event) = event_rx.recv() {
+            match event {
+                AppEvent::StartRecording => {
+                    // show overlay
+                    let _ = overlay_tx.send(OverlayCommand::Show(OverlayState::Listening));
+                    
+                    // record audio
+                    println!("gravando...");
+                    let recorder = AudioRecorder::new()?;
+                    let audio_data = recorder.record_for_seconds(5)?;
+                    
+                    // update overlay
+                    let _ = overlay_tx.send(OverlayCommand::Update(OverlayState::Transcribing));
+                    
+                    // transcribe
+                    println!("transcrevendo...");
+                    let transcriber = Transcriber::new(&model_path)?;
+                    let text = transcriber.transcribe(&audio_data, &config.language)?;
+                    
+                    // show result
+                    let _ = overlay_tx.send(OverlayCommand::Show(OverlayState::Result(text.clone())));
+                    
+                    // type the result
+                    println!("digitando: {}", text);
+                    input.type_text(&text)?;
+                    
+                    // hide overlay after a delay
+                    thread::sleep(std::time::Duration::from_millis(2000));
+                    let _ = overlay_tx.send(OverlayCommand::Hide);
+                }
+                AppEvent::StopRecording => {
+                    // handled above
+                }
+                AppEvent::OpenSettings => {
+                    println!("configuracao aberta (nao implementado ainda)");
+                }
+                AppEvent::Quit => {
+                    println!("encerrando whisperia...");
+                    break;
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+fn run_cli(cli: Cli) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
     let config = Config::load_or_create()?;
     
     // initialize hardware detection
@@ -51,7 +163,7 @@ async fn main() -> Result<()> {
     
     if let Some(model_id) = cli.check_model {
         info!("checking huggingface model: {}", model_id);
-        let compatibility = hardware.check_huggingface_model(&model_id).await?;
+        let compatibility = rt.block_on(hardware.check_huggingface_model(&model_id))?;
         
         println!("\nmodel compatibility report");
         println!("========================================");
@@ -87,6 +199,36 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     
+    // transcribe audio
+    if let Some(seconds) = cli.transcribe {
+        let model_path = if let Some(path) = cli.model_path {
+            PathBuf::from(path)
+        } else {
+            get_model_path(&config)?
+        };
+        
+        println!("\nwhisperia transcription");
+        println!("========================================");
+        println!("recording for {} seconds...", seconds);
+        println!("speak now!\n");
+        
+        // record audio
+        let recorder = AudioRecorder::new()?;
+        let audio_data = recorder.record_for_seconds(seconds)?;
+        
+        println!("recording complete! transcribing...\n");
+        
+        // transcribe
+        let transcriber = Transcriber::new(&model_path)?;
+        let text = transcriber.transcribe(&audio_data, &config.language)?;
+        
+        println!("transcription result:");
+        println!("\"{}\"", text);
+        println!("========================================\n");
+        
+        return Ok(());
+    }
+    
     // default: show info and hardware
     println!("\nwhisperia voice transcription tool");
     println!("========================================");
@@ -113,11 +255,24 @@ async fn main() -> Result<()> {
     
     println!("\nusage:");
     println!("  --check-hardware      check system compatibility");
-    println!("  --check-model <id>    check if hf model works (e.g., 'openai/whisper-base')");
+    println!("  --check-model <id>    check if hf model works");
     println!("  --list-models         list all available models");
+    println!("  --transcribe <secs>   record and transcribe audio");
+    println!("  --daemon              run in daemon mode with UI");
     
     println!("\ngui version coming soon!");
     println!("========================================\n");
     
     Ok(())
+}
+
+fn get_model_path(config: &Config) -> Result<PathBuf> {
+    let models_dir = Config::models_dir()?;
+    let model_file = models_dir.join(format!("ggml-{}.bin", config.model.local_model));
+    
+    if model_file.exists() {
+        Ok(model_file)
+    } else {
+        anyhow::bail!("model not found. use download-models.sh or --model-path")
+    }
 }

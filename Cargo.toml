@@ -41,6 +41,21 @@ sysinfo = "0.33"
 # For CLI interface
 clap = { version = "4.4", features = ["derive"] }
 
+# Audio capture
+cpal = "0.15"
+hound = "3.5"
+
+# Whisper transcription
+whisper-rs = "0.15"
+
+# UI dependencies
+tray-icon = "0.19"
+global-hotkey = "0.6"
+winit = "0.30"
+x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
+softbuffer = "0.4"
+enigo = "0.2"
+
 [[bin]]
 name = "whisperia"
 path = "src/main.rs"
