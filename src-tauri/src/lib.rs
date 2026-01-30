@@ -178,13 +178,13 @@ async fn update_config(
 }
 
 #[tauri::command]
-async fn get_available_models() -> Result<Vec<hardware::ModelCompatibility>, String> {
+fn get_available_models() -> Result<Vec<hardware::ModelCompatibility>, String> {
     let detector = HardwareDetector::new().map_err(|e| e.to_string())?;
     Ok(detector.get_available_models())
 }
 
 #[tauri::command]
-async fn get_system_info() -> Result<hardware::SystemInfo, String> {
+fn get_system_info() -> Result<hardware::SystemInfo, String> {
     let detector = HardwareDetector::new().map_err(|e| e.to_string())?;
     Ok(detector.get_system_info())
 }
@@ -239,7 +239,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn setup_tray(app: &tauri::App) -> anyhow::Result<()> {
+fn setup_tray(_app: &tauri::App) -> anyhow::Result<()> {
     use tray_icon::{TrayIconBuilder, menu::Menu, menu::MenuItem, menu::PredefinedMenuItem};
     
     let quit_i = MenuItem::new("Quit", true, None);

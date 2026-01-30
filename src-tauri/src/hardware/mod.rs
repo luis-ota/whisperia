@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use tracing::{info, warn};
 
@@ -7,7 +7,7 @@ pub struct HardwareDetector {
     sys: System,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SystemInfo {
     pub total_memory_gb: u64,
     pub available_memory_gb: u64,
@@ -17,7 +17,7 @@ pub struct SystemInfo {
     pub gpu_vram_gb: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ModelCompatibility {
     pub model: String,
     pub can_run: bool,
