@@ -8,8 +8,9 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri::tray::TrayIconBuilder;
+use tauri::tray::TrayIconEvent;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tracing::info;
+use tracing::{info, error, warn};
 
 #[cfg(target_os = "linux")]
 use x11rb::protocol::xproto::ConnectionExt;
@@ -175,6 +176,25 @@ async fn hide_overlay(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn start_recording(app: AppHandle) -> Result<(), String> {
+    info!("start_recording command invoked");
+    trigger_transcription_flow(app).map_err(|e| {
+        error!("Failed to start recording: {}", e);
+        e.to_string()
+    })
+}
+
+#[tauri::command]
+async fn stop_recording(app: AppHandle) -> Result<(), String> {
+    info!("stop_recording command invoked");
+    // For now, this just hides the overlay and resets state
+    let state = app.state::<AppState>();
+    state.set_recording(false);
+    state.set_transcribing(false);
+    hide_overlay_window(&app).map_err(|e| e.to_string())
+}
+
 fn get_model_path(config: &Config) -> anyhow::Result<PathBuf> {
     let models_dir = Config::models_dir()?;
     let model_file = models_dir.join(format!("ggml-{}.bin", config.model.local_model));
@@ -244,10 +264,12 @@ fn setup_tray(app: &mut tauri::App) -> anyhow::Result<()> {
         .tooltip("Whisperia")
         .icon(app.default_window_icon().unwrap().clone())
         .on_tray_icon_event(|tray, event| {
-            use tauri::tray::TrayIconEvent;
             if let TrayIconEvent::Click { .. } = event {
                 let app = tray.app_handle();
-                let _ = trigger_transcription_flow(app.clone());
+                info!("Tray icon clicked - triggering transcription");
+                if let Err(e) = trigger_transcription_flow(app.clone()) {
+                    error!("Failed to trigger transcription from tray: {}", e);
+                }
             }
         })
         .build(app)?;
@@ -305,12 +327,17 @@ fn trigger_transcription_flow(app: AppHandle) -> anyhow::Result<()> {
     
     // Spawn recording thread
     thread::spawn(move || {
+        info!("Starting audio recording thread");
+        
         // Record audio
         let recorder = match AudioRecorder::new() {
             Ok(r) => r,
             Err(e) => {
+                error!("Failed to create audio recorder: {}", e);
                 let _ = app_clone.emit("status-update", format!("Error: {}", e));
+                let _ = app_clone.emit("transcription-error", format!("Audio recorder error: {}", e));
                 let _ = hide_overlay_window(&app_clone);
+                state_clone.set_recording(false);
                 return;
             }
         };
@@ -318,6 +345,7 @@ fn trigger_transcription_flow(app: AppHandle) -> anyhow::Result<()> {
         // Record for 5 seconds
         match recorder.record_for_seconds(5) {
             Ok(data) => {
+                info!("Audio recorded successfully: {} samples", data.len());
                 state_clone.store_audio(data);
                 let _ = app_clone.emit("status-update", "Transcribing...");
                 if let Some(overlay) = app_clone.get_webview_window("overlay") {
@@ -333,8 +361,11 @@ fn trigger_transcription_flow(app: AppHandle) -> anyhow::Result<()> {
                 let audio_data = match state.take_audio() {
                     Some(data) => data,
                     None => {
+                        error!("No audio data available after recording");
                         let _ = app_clone.emit("status-update", "Error: No audio data");
+                        let _ = app_clone.emit("transcription-error", "No audio data available");
                         let _ = hide_overlay_window(&app_clone);
+                        state.set_transcribing(false);
                         return;
                     }
                 };
@@ -344,42 +375,61 @@ fn trigger_transcription_flow(app: AppHandle) -> anyhow::Result<()> {
                 let model_path = match get_model_path(&config) {
                     Ok(path) => path,
                     Err(e) => {
+                        error!("Model not found: {}", e);
                         let _ = app_clone.emit("status-update", format!("Error: {}", e));
+                        let _ = app_clone.emit("transcription-error", format!("Model error: {}", e));
                         let _ = hide_overlay_window(&app_clone);
+                        state.set_transcribing(false);
                         return;
                     }
                 };
+                
+                info!("Loading transcriber with model: {:?}", model_path);
                 
                 // Transcribe
                 let transcriber = match Transcriber::new(&model_path) {
                     Ok(t) => t,
                     Err(e) => {
+                        error!("Failed to load transcriber: {}", e);
                         let _ = app_clone.emit("status-update", format!("Error: {}", e));
+                        let _ = app_clone.emit("transcription-error", format!("Transcriber error: {}", e));
                         let _ = hide_overlay_window(&app_clone);
+                        state.set_transcribing(false);
                         return;
                     }
                 };
                 
+                info!("Starting transcription with language: {}", config.language);
+                
                 let text = match transcriber.transcribe(&audio_data, &config.language) {
                     Ok(t) => t,
                     Err(e) => {
+                        error!("Transcription failed: {}", e);
                         let _ = app_clone.emit("status-update", format!("Error: {}", e));
+                        let _ = app_clone.emit("transcription-error", format!("Transcription failed: {}", e));
                         let _ = hide_overlay_window(&app_clone);
+                        state.set_transcribing(false);
                         return;
                     }
                 };
+                
+                info!("Transcription complete: '{}'", text);
                 
                 // Type the result
                 let mut input = match InputSimulator::new() {
                     Ok(i) => i,
                     Err(e) => {
+                        error!("Failed to create input simulator: {}", e);
                         let _ = app_clone.emit("status-update", format!("Error: {}", e));
+                        let _ = app_clone.emit("transcription-error", format!("Input error: {}", e));
                         let _ = hide_overlay_window(&app_clone);
+                        state.set_transcribing(false);
                         return;
                     }
                 };
                 
                 if let Err(e) = input.type_text(&text) {
+                    warn!("Failed to type text: {}", e);
                     let _ = app_clone.emit("status-update", format!("Error typing: {}", e));
                 }
                 
@@ -389,6 +439,7 @@ fn trigger_transcription_flow(app: AppHandle) -> anyhow::Result<()> {
                 // Emit to frontend
                 let _ = app_clone.emit("transcription-update", &text);
                 let _ = app_clone.emit("status-update", "Ready");
+                let _ = app_clone.emit("transcription-complete", &text);
                 if let Some(overlay) = app_clone.get_webview_window("overlay") {
                     let _ = overlay.emit("transcription-complete", &text);
                 }
@@ -398,8 +449,11 @@ fn trigger_transcription_flow(app: AppHandle) -> anyhow::Result<()> {
                 let _ = hide_overlay_window(&app_clone);
             }
             Err(e) => {
+                error!("Audio recording failed: {}", e);
                 let _ = app_clone.emit("status-update", format!("Error: {}", e));
+                let _ = app_clone.emit("transcription-error", format!("Recording error: {}", e));
                 let _ = hide_overlay_window(&app_clone);
+                state_clone.set_recording(false);
             }
         }
     });
@@ -427,6 +481,8 @@ pub fn run() {
             open_settings,
             show_overlay,
             hide_overlay,
+            start_recording,
+            stop_recording,
         ])
         .setup(|app| {
             info!("Whisperia Tauri app starting...");
@@ -447,9 +503,13 @@ pub fn run() {
             app.on_menu_event(move |app, event| {
                 match event.id.as_ref() {
                     "transcribe" => {
-                        let _ = trigger_transcription_flow(app.clone());
+                        info!("Menu 'transcribe' clicked");
+                        if let Err(e) = trigger_transcription_flow(app.clone()) {
+                            error!("Failed to trigger transcription from menu: {}", e);
+                        }
                     }
                     "settings" => {
+                        info!("Menu 'settings' clicked");
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
@@ -457,19 +517,29 @@ pub fn run() {
                         }
                     }
                     "quit" => {
+                        info!("Menu 'quit' clicked - exiting application");
                         app.exit(0);
                     }
                     _ => {}
                 }
             });
             
-            // Setup global hotkey event handler
+            // Setup global hotkey event receiver thread
             let app_handle = app.handle().clone();
-            GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
-                if event.state == HotKeyState::Pressed {
-                    let _ = trigger_transcription_flow(app_handle.clone());
+            thread::spawn(move || {
+                info!("Starting global hotkey event listener thread");
+                let receiver = GlobalHotKeyEvent::receiver();
+                loop {
+                    if let Ok(event) = receiver.recv() {
+                        info!("Global hotkey event received: {:?}", event);
+                        if event.state == HotKeyState::Pressed {
+                            if let Err(e) = trigger_transcription_flow(app_handle.clone()) {
+                                error!("Failed to trigger transcription from hotkey: {}", e);
+                            }
+                        }
+                    }
                 }
-            }));
+            });
             
             Ok(())
         })
