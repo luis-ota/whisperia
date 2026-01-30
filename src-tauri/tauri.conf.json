@@ -11,13 +11,29 @@
     "windows": [
       {
         "title": "Whisperia",
+        "label": "main",
         "width": 400,
         "height": 600,
         "resizable": true,
         "fullscreen": false,
         "center": true,
-        "visible": false,
+        "visible": true,
         "skipTaskbar": false
+      },
+      {
+        "title": "Whisperia Overlay",
+        "label": "overlay",
+        "width": 400,
+        "height": 150,
+        "resizable": false,
+        "fullscreen": false,
+        "center": false,
+        "visible": false,
+        "skipTaskbar": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "focus": false
       }
     ],
     "security": {
