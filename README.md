@@ -7,9 +7,7 @@ ferramenta de transcrição de voz de alta performance para linux (especialmente
 - transcrição de voz local usando whisper
 - compatibilidade com qualquer modelo huggingface
 - detecção automática de hardware e compatibilidade
-- atalho de teclado global configurável
-- ícone na system tray (polybar/systray)
-- janela flutuante estilo perssua/cluely
+- cli funcional
 - muito performático - escrito em rust
 
 ## instalação
@@ -50,6 +48,11 @@ o binário estará em `target/release/whisperia`
 ```bash
 ./target/release/whisperia --check-model openai/whisper-base
 ./target/release/whisperia --check-model openai/whisper-large-v3
+```
+
+### transcrever audio (modo cli):
+```bash
+./target/release/whisperia --transcribe 5 --model-path ~/.local/share/whisperia/models/ggml-base.bin
 ```
 
 ## configuração
@@ -107,13 +110,14 @@ whisperia/
 - [x] detecção de hardware
 - [x] verificação de compatibilidade huggingface
 - [x] cli funcional
-- [ ] gravação de áudio
-- [ ] transcrição whisper local
+- [x] gravação de áudio
+- [x] transcrição whisper local
 - [ ] integração com apis (openai, openrouter)
 - [ ] system tray
 - [ ] hotkeys globais
 - [ ] overlay flutuante
 - [ ] simulação de teclado
+- [ ] frontend/gui (tauri)
 
 ## licença
 
