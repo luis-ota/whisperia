@@ -54,6 +54,10 @@ struct Cli {
     /// run in daemon mode with UI
     #[arg(long)]
     daemon: bool,
+    
+    /// record until ctrl+c is pressed (interactive mode)
+    #[arg(long)]
+    interactive: bool,
 }
 
 fn main() -> Result<()> {
@@ -199,7 +203,7 @@ fn run_cli(cli: Cli) -> Result<()> {
         return Ok(());
     }
     
-    // transcribe audio
+    // transcribe audio with fixed duration
     if let Some(seconds) = cli.transcribe {
         let model_path = if let Some(path) = cli.model_path {
             PathBuf::from(path)
@@ -217,6 +221,35 @@ fn run_cli(cli: Cli) -> Result<()> {
         let audio_data = recorder.record_for_seconds(seconds)?;
         
         println!("recording complete! transcribing...\n");
+        
+        // transcribe
+        let transcriber = Transcriber::new(&model_path)?;
+        let text = transcriber.transcribe(&audio_data, &config.language)?;
+        
+        println!("transcription result:");
+        println!("\"{}\"", text);
+        println!("========================================\n");
+        
+        return Ok(());
+    }
+    
+    // interactive mode: record until ctrl+c
+    if cli.interactive {
+        let model_path = if let Some(path) = cli.model_path {
+            PathBuf::from(path)
+        } else {
+            get_model_path(&config)?
+        };
+        
+        println!("\nwhisperia transcription (interactive mode)");
+        println!("========================================");
+        println!("gravando... pressione ctrl+c para parar\n");
+        
+        // record audio until ctrl+c
+        let recorder = AudioRecorder::new()?;
+        let audio_data = recorder.record_until_interrupt()?;
+        
+        println!("\ntranscrevendo...\n");
         
         // transcribe
         let transcriber = Transcriber::new(&model_path)?;
@@ -257,10 +290,14 @@ fn run_cli(cli: Cli) -> Result<()> {
     println!("  --check-hardware      check system compatibility");
     println!("  --check-model <id>    check if hf model works");
     println!("  --list-models         list all available models");
-    println!("  --transcribe <secs>   record and transcribe audio");
-    println!("  --daemon              run in daemon mode with UI");
+    println!("  --transcribe <secs>   record for fixed seconds");
+    println!("  --interactive         record until ctrl+c");
+    println!("  --model-path <path>   use specific model file");
     
-    println!("\ngui version coming soon!");
+    println!("\nexamples:");
+    println!("  whisperia --transcribe 5");
+    println!("  whisperia --interactive");
+    println!("  whisperia --transcribe 10 --model-path ~/.local/share/whisperia/models/ggml-small.bin");
     println!("========================================\n");
     
     Ok(())

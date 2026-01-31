@@ -55,6 +55,7 @@ winit = "0.30"
 x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 softbuffer = "0.4"
 enigo = "0.2"
+ctrlc = "3.5.1"
 
 [[bin]]
 name = "whisperia"
