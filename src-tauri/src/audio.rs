@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tracing::info;
 
 pub struct AudioRecorder {
@@ -122,5 +124,106 @@ impl AudioRecorder {
         }
 
         output
+    }
+
+    pub fn record_until_interrupt(&self) -> Result<Vec<f32>> {
+        info!("recording until ctrl+c...");
+        println!("gravando... pressione ctrl+c para parar");
+
+        let should_stop = Arc::new(AtomicBool::new(false));
+        let should_stop_clone = should_stop.clone();
+
+        // setup ctrl+c handler
+        ctrlc::set_handler(move || {
+            println!("\nparando gravacao...");
+            should_stop_clone.store(true, Ordering::SeqCst);
+        })
+        .expect("error setting ctrl+c handler");
+
+        let recorded_samples = Arc::new(Mutex::new(Vec::new()));
+        let samples_clone = recorded_samples.clone();
+
+        let err_fn = move |err| {
+            eprintln!("audio stream error: {}", err);
+        };
+
+        let stream = match self.sample_format {
+            SampleFormat::F32 => {
+                let samples = samples_clone.clone();
+                let stop_flag = should_stop.clone();
+                self.device.build_input_stream(
+                    &self.config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if !stop_flag.load(Ordering::SeqCst) {
+                            let mut vec = samples.lock().unwrap();
+                            for &sample in data {
+                                vec.push(sample);
+                            }
+                        }
+                    },
+                    err_fn,
+                    None,
+                )?
+            }
+            SampleFormat::I16 => {
+                let samples = samples_clone.clone();
+                let stop_flag = should_stop.clone();
+                self.device.build_input_stream(
+                    &self.config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        if !stop_flag.load(Ordering::SeqCst) {
+                            let mut vec = samples.lock().unwrap();
+                            for &sample in data {
+                                vec.push(sample as f32 / 32768.0);
+                            }
+                        }
+                    },
+                    err_fn,
+                    None,
+                )?
+            }
+            _ => anyhow::bail!("unsupported sample format"),
+        };
+
+        stream.play()?;
+
+        // wait until ctrl+c is pressed
+        let start = Instant::now();
+        while !should_stop.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // show elapsed time
+            let elapsed = start.elapsed().as_secs();
+            if elapsed > 0 && elapsed % 5 == 0 {
+                let mins = elapsed / 60;
+                let secs = elapsed % 60;
+                print!(
+                    "\rgravando: {:02}:{:02} - pressione ctrl+c para parar",
+                    mins, secs
+                );
+                std::io::Write::flush(&mut std::io::stdout()).unwrap();
+            }
+        }
+
+        drop(stream);
+
+        let samples = recorded_samples.lock().unwrap().clone();
+        info!(
+            "recorded {} samples ({} seconds)",
+            samples.len(),
+            samples.len() / self.config.sample_rate.0 as usize
+        );
+        println!(
+            "\ngravacao finalizada: {} segundos",
+            samples.len() / self.config.sample_rate.0 as usize
+        );
+
+        // resample to 16khz if needed
+        if self.config.sample_rate.0 != 16000 {
+            let resampled = Self::resample(&samples, self.config.sample_rate.0, 16000);
+            Ok(resampled)
+        } else {
+            Ok(samples)
+        }
     }
 }

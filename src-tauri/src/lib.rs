@@ -195,6 +195,42 @@ async fn stop_recording(app: AppHandle) -> Result<(), String> {
     hide_overlay_window(&app).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn start_interactive_recording(app: AppHandle) -> Result<String, String> {
+    info!("start_interactive_recording command invoked");
+    
+    // Show overlay
+    show_overlay_window(&app).map_err(|e| e.to_string())?;
+    
+    let state = app.state::<AppState>();
+    state.set_recording(true);
+    
+    // Record until Ctrl+C
+    let recorder = audio::AudioRecorder::new().map_err(|e| e.to_string())?;
+    let audio_data = recorder.record_until_interrupt().map_err(|e| e.to_string())?;
+    
+    state.set_recording(false);
+    state.set_transcribing(true);
+    
+    // Get config and transcribe
+    let config = state.get_config();
+    let model_path = get_model_path(&config).map_err(|e| e.to_string())?;
+    
+    let transcriber = transcription::Transcriber::new(&model_path).map_err(|e| e.to_string())?;
+    let text = transcriber.transcribe(&audio_data, &config.language).map_err(|e| e.to_string())?;
+    
+    state.set_transcribing(false);
+    
+    // Type the result
+    let mut input = input::InputSimulator::new().map_err(|e| e.to_string())?;
+    input.type_text(&text).map_err(|e| e.to_string())?;
+    
+    // Hide overlay
+    hide_overlay_window(&app).map_err(|e| e.to_string())?;
+    
+    Ok(text)
+}
+
 fn get_model_path(config: &Config) -> anyhow::Result<PathBuf> {
     let models_dir = Config::models_dir()?;
     
@@ -468,6 +504,16 @@ fn trigger_transcription_flow(app: AppHandle) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn show_overlay_window(app: &AppHandle) -> anyhow::Result<()> {
+    if let Some(window) = app.get_webview_window("overlay") {
+        let (x, y) = get_cursor_position();
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y: y - 100 }));
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
 fn hide_overlay_window(app: &AppHandle) -> anyhow::Result<()> {
     if let Some(window) = app.get_webview_window("overlay") {
         let _ = window.hide();
@@ -490,6 +536,7 @@ pub fn run() {
             hide_overlay,
             start_recording,
             stop_recording,
+            start_interactive_recording,
         ])
         .setup(|app| {
             info!("Whisperia Tauri app starting...");
