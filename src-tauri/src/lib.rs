@@ -197,12 +197,19 @@ async fn stop_recording(app: AppHandle) -> Result<(), String> {
 
 fn get_model_path(config: &Config) -> anyhow::Result<PathBuf> {
     let models_dir = Config::models_dir()?;
-    let model_file = models_dir.join(format!("ggml-{}.bin", config.model.local_model));
     
+    // Try quantized version first (Q5_0 has best quality/size ratio)
+    let quantized_file = models_dir.join(format!("ggml-{}-q5_0.bin", config.model.local_model));
+    if quantized_file.exists() {
+        return Ok(quantized_file);
+    }
+    
+    // Fallback to standard model
+    let model_file = models_dir.join(format!("ggml-{}.bin", config.model.local_model));
     if model_file.exists() {
         Ok(model_file)
     } else {
-        anyhow::bail!("Model not found. Use download-models.sh or --model-path")
+        anyhow::bail!("Model not found. Run ./download-quantized.sh to download optimized models (40% smaller, same quality)")
     }
 }
 
