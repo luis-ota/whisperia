@@ -305,11 +305,23 @@ fn run_cli(cli: Cli) -> Result<()> {
 
 fn get_model_path(config: &Config) -> Result<PathBuf> {
     let models_dir = Config::models_dir()?;
-    let model_file = models_dir.join(format!("ggml-{}.bin", config.model.local_model));
     
+    // Try quantized version first (Q5_0 has best quality/size ratio)
+    let quantized_file = models_dir.join(format!("ggml-{}-q5_0.bin", config.model.local_model));
+    if quantized_file.exists() {
+        // Check if file is valid (not empty/corrupted)
+        if std::fs::metadata(&quantized_file)?.len() > 1000000 {
+            println!("usando modelo quantizado: {}", quantized_file.display());
+            return Ok(quantized_file);
+        }
+    }
+    
+    // Fallback to standard model
+    let model_file = models_dir.join(format!("ggml-{}.bin", config.model.local_model));
     if model_file.exists() {
+        println!("usando modelo padrao: {}", model_file.display());
         Ok(model_file)
     } else {
-        anyhow::bail!("model not found. use download-models.sh or --model-path")
+        anyhow::bail!("modelo nao encontrado. execute ./download-models.sh ou use --model-path")
     }
 }
